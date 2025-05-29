@@ -1,5 +1,6 @@
 import json
 import re
+from dataclasses import dataclass
 
 from mcp_client import MCPClient, MCPServer, MCPTool
 from langchain_openai import ChatOpenAI
@@ -131,6 +132,12 @@ Now Begin! If you solve the task correctly, you will receive a reward of $1,000,
 """
 
 
+@dataclass
+class Conversation:
+    user_content: str
+    ai_content: str
+
+
 class LLMClient:
     def __init__(self, model: str, base_url: str, api_key: str):
         self.model_client = ChatOpenAI(model=model, base_url=base_url, api_key=api_key)
@@ -138,6 +145,11 @@ class LLMClient:
         self.available_tools: List[MCPTool] = []
         self.mcp_servers: List[MCPServer] = []
         self.system_prompt: str = ""
+        self.conversation_history: List[Conversation] = []
+        self.max_conversation: int = 5
+
+    def clear_conversation_history(self):
+        self.conversation_history = []
 
     def add_mcp_server(self, mcp_server: MCPServer):
         """
@@ -160,8 +172,8 @@ class LLMClient:
 
         tool_prompt = ""
         for tool in self.available_tools:
-            tool_prompt += (f"\n<tool_use>\n<name>{tool.name}</name>\n<description>{tool.description}</description>\n"
-                           f"<arguments>{tool.input_schema}</arguments>\n</tool_use>\n")
+            tool_prompt += (f"\n<tool>\n<name>{tool.name}</name>\n<description>{tool.description}</description>\n"
+                           f"<arguments>{tool.input_schema}</arguments>\n</tool>\n")
         return mcp_prompt.format(available_tools=tool_prompt, user_system_prompt=self.system_prompt)
 
     async def parse_tool_use(self, resp_content: str) -> List[Dict[str, Any]]:
@@ -189,6 +201,34 @@ class LLMClient:
                 })
         return tools
 
+    async def ask_llm(self, system_prompt: str, user_message: str) -> str:
+        """
+        添加历史记录请求大模型
+        """
+
+        # 添加系统提示词
+        message = [{"role": "system", "content": system_prompt}]
+
+        # 添加历史会话
+        for history_message in self.conversation_history[-self.max_conversation:]:
+            message.append({"role": "user", "content": history_message.user_content})
+            message.append({"role": "assistant", "content": history_message.ai_content})
+
+        # 添加用户请求
+        message.append({"role": "user", "content": user_message})
+
+        assistant_content = ""
+        # 请求大模型
+        async for chunk in self.model_client.astream(message):
+            if hasattr(chunk, "content") and chunk.content:
+                print(chunk.content, end="", flush=True)
+                assistant_content += chunk.content
+
+        # 记录当前会话
+        self.conversation_history.append(Conversation(user_content=user_message, ai_content=assistant_content))
+
+        return assistant_content
+
     async def chat(self, user_message: str):
         # 添加系统提示词
         system_prompt = self.system_prompt
@@ -196,32 +236,12 @@ class LLMClient:
         if self.available_tools:
             system_prompt = await self.generate_mcp_prompt()
 
-        message = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message}
-        ]
-
-        assistant_content = ""
-        # 第一次请求大模型
-        async for chunk in self.model_client.astream(message):
-            if hasattr(chunk, "content") and chunk.content:
-                print(chunk.content, end="", flush=True)
-                assistant_content += chunk.content
-
+        assistant_content = await self.ask_llm(system_prompt, user_message)
         tools_call = await self.parse_tool_use(assistant_content)
 
         while tools_call:
-            print("tool use")
             results = await self.mcp_client.tools_call(tools_call)
-            message.append({"role": "assistant", "content": assistant_content})
-            message.append({"role": "user", "content": results})
-
-            assistant_content = ""
-            async for chunk in self.model_client.astream(message):
-                if hasattr(chunk, "content") and chunk.content:
-                    print(chunk.content, end="", flush=True)
-                    assistant_content += chunk.content
-
+            assistant_content = await self.ask_llm(system_prompt, str(results))
             tools_call = await self.parse_tool_use(assistant_content)
 
 

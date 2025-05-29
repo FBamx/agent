@@ -1,5 +1,5 @@
 import asyncio
-from mcp_llm import LLMClient
+from llm import LLMClient
 from mcp_client import MCPServer
 
 
@@ -18,19 +18,22 @@ async def main():
 
     await llm.get_mcp_tools()
 
-    print("AI助手已启动, 输入 'quit' 退出, 'history' 显示历史消息, 'clear' 清空历史消息")
+    print("AI助手🤖已启动, 输入 'quit' 退出, 'history' 显示历史消息, 'clear' 清空历史消息")
 
     while True:
-        user_input = input("\n\n你: ").strip()
+        user_input = input("\n\n用户😊: ").strip()
         if user_input.lower() == "quit":
             print("退出AI助手")
             break
         elif user_input.lower() == "history":
-            pass
+            for i, history_message in enumerate(llm.conversation_history, 1):
+                print(f"\n第{i}轮对话: ")
+                print(f"用户😊: {history_message.user_content}")
+                print(f"AI助手🤖: {history_message.ai_content}")
         elif user_input.lower() == "clear":
-            pass
+            llm.clear_conversation_history()
         else:
-            print("\nAI助手: ", end="")
+            print("\nAI助手🤖: ", end="")
             await llm.chat(user_input)
 
 

@@ -66,7 +66,5 @@ class MCPClient:
             print(f"\n\n开始调用工具{tool_name}, 调用参数: {tool_args}")
             result = await self.session.call_tool(tool_name, tool_args)
             print(f"调用结果: {result}")
-            for content in result:
-                if hasattr(content, "text") and content.text:
-                    results.append(content.text)
+            results.append(result.content)
         return results
